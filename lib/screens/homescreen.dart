@@ -88,7 +88,7 @@ class Homescreen extends StatelessWidget {
                     "Add Student",
                     "View Students",
                     "Mark Attendence",
-                    "Our Staff",
+                    "View History",
                   ];
                   return ReusablecontainerContainer(title: titles[index]);
                 },

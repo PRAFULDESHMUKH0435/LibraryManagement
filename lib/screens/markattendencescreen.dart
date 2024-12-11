@@ -1,49 +1,43 @@
 import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart'; // For getting the current date in 'yyyy-MM-dd' format
+import 'package:intl/intl.dart';
 
-class MarkAttendenceScreen extends StatefulWidget {
-  const MarkAttendenceScreen({super.key});
+class MarkAttendanceScreen extends StatefulWidget {
+  const MarkAttendanceScreen({super.key});
 
   @override
-  State<MarkAttendenceScreen> createState() => _MarkAttendenceScreenState();
+  State<MarkAttendanceScreen> createState() => _MarkAttendanceScreenState();
 }
 
-class _MarkAttendenceScreenState extends State<MarkAttendenceScreen> {
+class _MarkAttendanceScreenState extends State<MarkAttendanceScreen> {
   List<Map<dynamic, dynamic>> students = [];
   List<Map<dynamic, dynamic>> filteredStudents = [];
   TextEditingController searchController = TextEditingController();
-  TextEditingController passwordController = TextEditingController();
+  String selectedDate = DateFormat('yyyy-MM-dd').format(DateTime.now());
+  int presentCount = 0;
 
   // Fetch students from the database
-  Future<void> fetchStudents() async {
+  Future<void> fetchStudents({String? date}) async {
     try {
       final ref = FirebaseDatabase.instance.ref("CollegeDatabase");
-
-      // Fetch data snapshot
       final snapshot = await ref.get();
 
       if (snapshot.exists) {
         final studentsData = snapshot.value as Map<dynamic, dynamic>;
 
-        // Clear the existing list before adding new data
         students.clear();
-
         studentsData.forEach((key, value) {
-          // Add student data into the list
           students.add({
             'id': key,
             'name': value['Name'] ?? 'N/A',
             'class': value['Class'] ?? 'N/A',
             'idNumber': value['Id'] ?? 'N/A',
-            'isPresent': value['isPresent'] ?? false,
+            'isPresent': false, // Default all to absent for the selected date
           });
         });
 
-        // Set filteredStudents to the full list initially
         filteredStudents = List.from(students);
-
-        // Refresh UI after data is fetched
+        updatePresentCount();
         setState(() {});
       } else {
         print("No students found in the database.");
@@ -55,105 +49,79 @@ class _MarkAttendenceScreenState extends State<MarkAttendenceScreen> {
 
   // Mark attendance for a student
   Future<void> markAttendance(String studentId) async {
-    try {
-      final ref = FirebaseDatabase.instance.ref("CollegeDatabase").child(studentId);
-
-      // Update the student's isPresent flag to true
-      await ref.update({'isPresent': true});
-
-      // Refresh the list of students
-      fetchStudents();
-
-      // Show success message
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Attendance marked for student ID: $studentId')),
-      );
-    } catch (e) {
-      print("Error while marking attendance: $e");
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Failed to mark attendance')),
-      );
-    }
+    setState(() {
+      final student = filteredStudents.firstWhere((student) => student['id'] == studentId);
+      student['isPresent'] = true;
+    });
+    updatePresentCount();
   }
 
-  // Add present students to Firebase under "PresentStudentData"
-  Future<void> addPresentStudents() async {
-    // Show dialog for password entry
-    showDialog(
-      context: context,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          title: const Text("Enter Password"),
-          content: TextField(
-            controller: passwordController,
-            decoration: const InputDecoration(labelText: 'Password'),
-            keyboardType: TextInputType.number, // Numeric input
-            obscureText: true, // Hide the password text
-          ),
-          actions: [
-            TextButton(
-              onPressed: () {
-                // Check if the entered password is correct
-                if (passwordController.text == '12345') {
-                  // Password is correct, proceed to save present students data
-                  savePresentStudents();
-                  Navigator.pop(context); // Close the dialog
-                } else {
-                  // Password is incorrect, show error message
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Incorrect password')),
-                  );
-                  Navigator.pop(context); // Close the dialog
-                }
-              },
-              child: const Text('OK'),
-            ),
-          ],
-        );
-      },
-    );
+  // Update present student count
+  void updatePresentCount() {
+    setState(() {
+      presentCount = filteredStudents.where((student) => student['isPresent']).length;
+    });
   }
 
   // Save present students to Firebase
   Future<void> savePresentStudents() async {
-    try {
-      final presentStudents = filteredStudents.where((student) => student['isPresent']).toList();
+    final confirmSave = await _showSaveAttendanceDialog();
 
-      if (presentStudents.isNotEmpty) {
-        // Get today's date in 'yyyy-MM-dd' format
-        String todayDate = DateFormat('yyyy-MM-dd').format(DateTime.now());
+    if (confirmSave) {
+      try {
+        final presentStudents = filteredStudents.where((student) => student['isPresent']).toList();
 
-        // Add present students under today's date
-        final ref = FirebaseDatabase.instance.ref("PresentStudentData").child(todayDate);
-        
-        // Store present students' data
-        await ref.set({
-          'presentStudents': presentStudents,
-        });
+        if (presentStudents.isNotEmpty) {
+          final ref = FirebaseDatabase.instance.ref("PresentStudentData").child(selectedDate);
 
+          await ref.set({'presentStudents': presentStudents});
+
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Present students data added to Database')),
+          );
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('No students present today')),
+          );
+        }
+      } catch (e) {
+        print("Error while adding present students: $e");
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Present students data added to Database')),
-        );
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('No students present today')),
+          const SnackBar(content: Text('Failed to add present students')),
         );
       }
-    } catch (e) {
-      print("Error while adding present students: $e");
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Failed to add present students')),
-      );
     }
+  }
+
+  // Show dialog to confirm attendance save
+  Future<bool> _showSaveAttendanceDialog() async {
+    return await showDialog(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text("Confirm Save"),
+            content: Text("Do you want to save attendance for the date: $selectedDate?"),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text("Cancel"),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text("Save"),
+              ),
+            ],
+          ),
+        ) ??
+        false;
   }
 
   @override
   void initState() {
     super.initState();
-    fetchStudents(); // Fetch data when the screen initializes
+    fetchStudents(); // Fetch data for today
   }
 
-  // Filter the students list based on the search query
+  // Filter students by name
   void filterStudents(String query) {
     final filtered = students.where((student) {
       final name = student['name'].toLowerCase();
@@ -166,6 +134,23 @@ class _MarkAttendenceScreenState extends State<MarkAttendenceScreen> {
     });
   }
 
+  // Select date and refresh student data
+  Future<void> selectDate(BuildContext context) async {
+    final pickedDate = await showDatePicker(
+      context: context,
+      initialDate: DateTime.now(),
+      firstDate: DateTime(2000),
+      lastDate: DateTime(2101),
+    );
+
+    if (pickedDate != null) {
+      setState(() {
+        selectedDate = DateFormat('yyyy-MM-dd').format(pickedDate);
+      });
+      fetchStudents(date: selectedDate); // Fetch data for the selected date
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -175,7 +160,7 @@ class _MarkAttendenceScreenState extends State<MarkAttendenceScreen> {
         actions: [
           IconButton(
             icon: const Icon(Icons.save, color: Colors.white),
-            onPressed: addPresentStudents, // Add present students to Firebase on button press
+            onPressed: savePresentStudents,
           ),
         ],
       ),
@@ -183,17 +168,43 @@ class _MarkAttendenceScreenState extends State<MarkAttendenceScreen> {
         children: [
           Padding(
             padding: const EdgeInsets.all(8.0),
-            child: TextField(
-              controller: searchController,
-              decoration: const InputDecoration(
-                labelText: "Search by name",
-                border: OutlineInputBorder(),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: searchController,
+                    decoration: const InputDecoration(
+                      labelText: "Search by name",
+                      border: OutlineInputBorder(),
+                    ),
+                    onChanged: filterStudents,
+                  ),
+                ),
+                const SizedBox(width: 8.0),
+                ElevatedButton(
+                  onPressed: () => selectDate(context),
+                  child: Text(selectedDate),
+                ),
+              ],
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.all(8.0),
+            child: Container(
+              padding: const EdgeInsets.all(8.0),
+              color: Colors.grey[200],
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text("Present Students:", style: TextStyle(fontSize: 16.0, fontWeight: FontWeight.bold)),
+                  Text("$presentCount", style: const TextStyle(fontSize: 16.0, fontWeight: FontWeight.bold)),
+                ],
               ),
-              onChanged: filterStudents, // Filter students as user types
             ),
           ),
           filteredStudents.isEmpty
-              ? const Center(child: CircularProgressIndicator())
+              ? const Expanded(child: Center(child: CircularProgressIndicator()))
               : Expanded(
                   child: ListView.builder(
                     itemCount: filteredStudents.length,
@@ -213,7 +224,7 @@ class _MarkAttendenceScreenState extends State<MarkAttendenceScreen> {
                               color: student['isPresent'] ? Colors.green : Colors.grey,
                             ),
                             onPressed: student['isPresent']
-                                ? null // Disable the button if attendance is already marked
+                                ? null
                                 : () {
                                     markAttendance(student['id']);
                                   },

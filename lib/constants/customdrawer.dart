@@ -53,7 +53,7 @@ class CustomDrawer extends StatelessWidget {
             title: const Text('About Us'),
             onTap: () {
               // Navigate to About Us screen (you can replace with actual screen)
-              Navigator.pushNamed(context, '/aboutUs');
+              // Navigator.pushNamed(context, '/aboutUs');
             },
           ),
 
@@ -63,7 +63,7 @@ class CustomDrawer extends StatelessWidget {
             title: const Text('Contact Us'),
             onTap: () {
               // Navigate to Contact Us screen (you can replace with actual screen)
-              Navigator.pushNamed(context, '/contactUs');
+              // Navigator.pushNamed(context, '/contactUs');
             },
           ),
         ],
